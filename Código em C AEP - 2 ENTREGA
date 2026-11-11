@@ -1,0 +1,523 @@
+/*
+ * PSE em Acao - Sistema de Planejamento e Acompanhamento de Acoes de Saude na Escola
+ * AEP - 2o semestre de 2026 - UniCesumar
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+#define MAX_ACOES          100
+#define TAM_TEXTO          100
+#define TAM_LINHA          256
+#define MAX_CODIGO         999999
+#define MAX_PARTICIPANTES  100000
+#define ENTRADA_INVALIDA   (-99999)
+
+struct Acao {
+    int codigo;
+    char escola[TAM_TEXTO];
+    char tema[TAM_TEXTO];
+    char data[TAM_TEXTO];
+    char publicoAlvo[TAM_TEXTO];
+    char responsavel[TAM_TEXTO];
+    int participantesPrevistos;
+    int participantesRealizados;
+    int situacao; /* 1 = Planejada, 2 = Realizada, 3 = Cancelada */
+};
+
+struct Acao acoes[MAX_ACOES];
+int totalAcoes = 0;
+
+/* ------------------------------------------------------------------ */
+/* Leitura e validacao de entradas                                    */
+/* ------------------------------------------------------------------ */
+
+/* Remove espacos e tabulacoes do inicio e do fim do texto. */
+void removerEspacosDasPontas(char texto[]) {
+    int inicio = 0;
+    int fim = (int) strlen(texto);
+
+    while (texto[inicio] == ' ' || texto[inicio] == '\t') {
+        inicio++;
+    }
+    while (fim > inicio && (texto[fim - 1] == ' ' || texto[fim - 1] == '\t')) {
+        fim--;
+    }
+    memmove(texto, texto + inicio, fim - inicio);
+    texto[fim - inicio] = '\0';
+}
+
+/* Le uma linha inteira do teclado. Se a entrada acabar (Ctrl+D / Ctrl+Z),
+   encerra o programa em vez de ficar repetindo o menu. */
+void lerLinha(char destino[], int tamanho) {
+    int caractere;
+
+    if (fgets(destino, tamanho, stdin) == NULL) {
+        printf("\nEntrada encerrada. Finalizando o programa.\n");
+        exit(0);
+    }
+
+    if (strchr(destino, '\n') == NULL) {
+        /* linha maior que o buffer: descarta o restante */
+        while ((caractere = getchar()) != '\n' && caractere != EOF) {
+        }
+    }
+
+    destino[strcspn(destino, "\n")] = '\0';
+    removerEspacosDasPontas(destino);
+}
+
+/* Le um numero inteiro. Devolve ENTRADA_INVALIDA se o texto nao for
+   um numero inteiro completo (ex.: "abc", "1abc", vazio ou muito grande). */
+int lerInteiro() {
+    char linha[TAM_LINHA];
+    char *fim;
+    long valor;
+
+    lerLinha(linha, TAM_LINHA);
+
+    if (linha[0] == '\0') {
+        return ENTRADA_INVALIDA;
+    }
+
+    valor = strtol(linha, &fim, 10);
+
+    if (*fim != '\0' || valor < -1000000L || valor > 1000000L) {
+        return ENTRADA_INVALIDA;
+    }
+
+    return (int) valor;
+}
+
+/* Le um texto obrigatorio: repete a pergunta ate receber um valor
+   preenchido e que caiba no campo. */
+void lerTextoObrigatorio(const char mensagem[], char destino[], int tamanho) {
+    char linha[TAM_LINHA];
+
+    while (1) {
+        printf("%s", mensagem);
+        lerLinha(linha, TAM_LINHA);
+
+        if (linha[0] == '\0') {
+            printf("Erro: campo obrigatorio. Informe um valor.\n");
+        } else if ((int) strlen(linha) >= tamanho) {
+            printf("Erro: o campo aceita no maximo %d caracteres.\n", tamanho - 1);
+        } else {
+            strcpy(destino, linha);
+            return;
+        }
+    }
+}
+
+/* Verifica se o texto esta vazio (ou so com espacos). */
+int textoVazio(char texto[]) {
+    int i = 0;
+
+    while (texto[i] == ' ' || texto[i] == '\t') {
+        i++;
+    }
+
+    return texto[i] == '\0';
+}
+
+/* Valida data no formato dd/mm/aaaa, incluindo dias do mes e ano bissexto. */
+int dataValida(const char data[]) {
+    int dia, mes, ano, diasNoMes, bissexto, i;
+
+    if (strlen(data) != 10 || data[2] != '/' || data[5] != '/') {
+        return 0;
+    }
+
+    for (i = 0; i < 10; i++) {
+        if (i != 2 && i != 5 && !isdigit((unsigned char) data[i])) {
+            return 0;
+        }
+    }
+
+    dia = (data[0] - '0') * 10 + (data[1] - '0');
+    mes = (data[3] - '0') * 10 + (data[4] - '0');
+    ano = (data[6] - '0') * 1000 + (data[7] - '0') * 100 +
+          (data[8] - '0') * 10 + (data[9] - '0');
+
+    if (ano < 2000 || ano > 2100 || mes < 1 || mes > 12 || dia < 1) {
+        return 0;
+    }
+
+    bissexto = (ano % 4 == 0 && ano % 100 != 0) || (ano % 400 == 0);
+
+    if (mes == 2) {
+        diasNoMes = bissexto ? 29 : 28;
+    } else if (mes == 4 || mes == 6 || mes == 9 || mes == 11) {
+        diasNoMes = 30;
+    } else {
+        diasNoMes = 31;
+    }
+
+    return dia <= diasNoMes;
+}
+
+void lerData(const char mensagem[], char destino[]) {
+    char linha[TAM_LINHA];
+
+    while (1) {
+        printf("%s", mensagem);
+        lerLinha(linha, TAM_LINHA);
+
+        if (linha[0] == '\0') {
+            printf("Erro: campo obrigatorio. Informe a data no formato dd/mm/aaaa.\n");
+        } else if (!dataValida(linha)) {
+            printf("Erro: data invalida. Use o formato dd/mm/aaaa (ex.: 20/11/2026).\n");
+        } else {
+            strcpy(destino, linha);
+            return;
+        }
+    }
+}
+
+/* Verifica se "texto" contem "trecho", sem diferenciar maiusculas e minusculas. */
+int contemIgnorandoCaixa(const char texto[], const char trecho[]) {
+    char minTexto[TAM_LINHA];
+    char minTrecho[TAM_LINHA];
+    int i;
+
+    for (i = 0; texto[i] != '\0' && i < TAM_LINHA - 1; i++) {
+        minTexto[i] = (char) tolower((unsigned char) texto[i]);
+    }
+    minTexto[i] = '\0';
+
+    for (i = 0; trecho[i] != '\0' && i < TAM_LINHA - 1; i++) {
+        minTrecho[i] = (char) tolower((unsigned char) trecho[i]);
+    }
+    minTrecho[i] = '\0';
+
+    return strstr(minTexto, minTrecho) != NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* Operacoes sobre o vetor de acoes                                   */
+/* ------------------------------------------------------------------ */
+
+/* Procura uma acao pelo codigo e devolve sua posicao no vetor (ou -1). */
+int buscarPosicaoPorCodigo(int codigo) {
+    int i;
+
+    for (i = 0; i < totalAcoes; i++) {
+        if (acoes[i].codigo == codigo) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+void mostrarSituacao(int situacao) {
+    if (situacao == 1) {
+        printf("Planejada");
+    } else if (situacao == 2) {
+        printf("Realizada");
+    } else if (situacao == 3) {
+        printf("Cancelada");
+    } else {
+        printf("Indefinida");
+    }
+}
+
+void mostrarAcao(int posicao) {
+    printf("\n----------------------------------------\n");
+    printf("Codigo: %d\n", acoes[posicao].codigo);
+    printf("Escola: %s\n", acoes[posicao].escola);
+    printf("Tema: %s\n", acoes[posicao].tema);
+    printf("Data prevista: %s\n", acoes[posicao].data);
+    printf("Publico-alvo: %s\n", acoes[posicao].publicoAlvo);
+    printf("Responsavel: %s\n", acoes[posicao].responsavel);
+    printf("Participantes previstos: %d\n", acoes[posicao].participantesPrevistos);
+    printf("Participantes efetivos: %d\n", acoes[posicao].participantesRealizados);
+    printf("Situacao: ");
+    mostrarSituacao(acoes[posicao].situacao);
+    printf("\n----------------------------------------\n");
+}
+
+/* ------------------------------------------------------------------ */
+/* Funcionalidades do menu                                            */
+/* ------------------------------------------------------------------ */
+
+void cadastrarAcao() {
+    struct Acao novaAcao;
+
+    if (totalAcoes >= MAX_ACOES) {
+        printf("\nLimite de armazenamento atingido. Nao e possivel cadastrar outra acao.\n");
+        return;
+    }
+
+    printf("\n=== CADASTRAR ACAO ===\n");
+    printf("Codigo numerico: ");
+    novaAcao.codigo = lerInteiro();
+
+    if (novaAcao.codigo <= 0 || novaAcao.codigo > MAX_CODIGO) {
+        printf("Erro: o codigo deve ser um numero inteiro positivo (1 a %d).\n", MAX_CODIGO);
+        return;
+    }
+
+    if (buscarPosicaoPorCodigo(novaAcao.codigo) != -1) {
+        printf("Erro: ja existe uma acao com esse codigo.\n");
+        return;
+    }
+
+    lerTextoObrigatorio("Nome da escola: ", novaAcao.escola, TAM_TEXTO);
+    lerTextoObrigatorio("Tema da acao: ", novaAcao.tema, TAM_TEXTO);
+    lerData("Data prevista (dd/mm/aaaa): ", novaAcao.data);
+    lerTextoObrigatorio("Publico-alvo (coletivo, sem nomes de estudantes): ",
+                        novaAcao.publicoAlvo, TAM_TEXTO);
+    lerTextoObrigatorio("Responsavel pela acao: ", novaAcao.responsavel, TAM_TEXTO);
+
+    while (1) {
+        printf("Quantidade prevista de participantes: ");
+        novaAcao.participantesPrevistos = lerInteiro();
+
+        if (novaAcao.participantesPrevistos >= 1 &&
+            novaAcao.participantesPrevistos <= MAX_PARTICIPANTES) {
+            break;
+        }
+        printf("Erro: a quantidade prevista deve ser um numero inteiro entre 1 e %d.\n",
+               MAX_PARTICIPANTES);
+    }
+
+    novaAcao.participantesRealizados = 0;
+    novaAcao.situacao = 1;
+
+    acoes[totalAcoes] = novaAcao;
+    totalAcoes++;
+
+    printf("\nAcao cadastrada com sucesso! Situacao inicial: Planejada. (%d/%d registros)\n",
+           totalAcoes, MAX_ACOES);
+}
+
+void listarAcoes() {
+    int i;
+
+    printf("\n=== LISTA DE ACOES ===\n");
+
+    if (totalAcoes == 0) {
+        printf("Nenhuma acao cadastrada.\n");
+        return;
+    }
+
+    for (i = 0; i < totalAcoes; i++) {
+        mostrarAcao(i);
+    }
+}
+
+void pesquisarAcoes() {
+    int opcao;
+    int codigo;
+    int i;
+    int encontrou = 0;
+    char termo[TAM_TEXTO];
+    char linha[TAM_LINHA];
+
+    printf("\n=== PESQUISAR ACOES ===\n");
+
+    if (totalAcoes == 0) {
+        printf("Nenhuma acao cadastrada para pesquisar.\n");
+        return;
+    }
+
+    printf("1 - Pesquisar por codigo\n");
+    printf("2 - Pesquisar por escola\n");
+    printf("3 - Pesquisar por tema\n");
+    printf("Escolha: ");
+    opcao = lerInteiro();
+
+    if (opcao == 1) {
+        printf("Informe o codigo: ");
+        codigo = lerInteiro();
+        i = buscarPosicaoPorCodigo(codigo);
+
+        if (i != -1) {
+            mostrarAcao(i);
+        } else {
+            printf("Nenhuma acao encontrada com esse codigo.\n");
+        }
+    } else if (opcao == 2 || opcao == 3) {
+        if (opcao == 2) {
+            printf("Digite o nome ou parte do nome da escola: ");
+        } else {
+            printf("Digite o tema ou parte do tema: ");
+        }
+        lerLinha(linha, TAM_LINHA);
+
+        if (textoVazio(linha)) {
+            printf("Erro: o termo de pesquisa nao pode ficar vazio.\n");
+            return;
+        }
+        strncpy(termo, linha, TAM_TEXTO - 1);
+        termo[TAM_TEXTO - 1] = '\0';
+
+        for (i = 0; i < totalAcoes; i++) {
+            if ((opcao == 2 && contemIgnorandoCaixa(acoes[i].escola, termo)) ||
+                (opcao == 3 && contemIgnorandoCaixa(acoes[i].tema, termo))) {
+                mostrarAcao(i);
+                encontrou++;
+            }
+        }
+
+        if (!encontrou) {
+            printf("Nenhuma acao encontrada para o termo informado.\n");
+        } else {
+            printf("\n%d acao(oes) encontrada(s).\n", encontrou);
+        }
+    } else {
+        printf("Opcao de pesquisa invalida.\n");
+    }
+}
+
+void atualizarSituacao() {
+    int codigo;
+    int posicao;
+    int novaSituacao;
+    int participantes;
+
+    printf("\n=== ATUALIZAR SITUACAO ===\n");
+
+    if (totalAcoes == 0) {
+        printf("Nenhuma acao cadastrada para atualizar.\n");
+        return;
+    }
+
+    printf("Codigo da acao: ");
+    codigo = lerInteiro();
+    posicao = buscarPosicaoPorCodigo(codigo);
+
+    if (posicao == -1) {
+        printf("Erro: acao nao encontrada.\n");
+        return;
+    }
+
+    printf("Nova situacao:\n");
+    printf("1 - Planejada\n");
+    printf("2 - Realizada\n");
+    printf("3 - Cancelada\n");
+    printf("Escolha: ");
+    novaSituacao = lerInteiro();
+
+    if (novaSituacao < 1 || novaSituacao > 3) {
+        printf("Erro: situacao invalida. Use 1, 2 ou 3.\n");
+        return;
+    }
+
+    if (novaSituacao == 2) {
+        while (1) {
+            printf("Quantidade efetiva de participantes: ");
+            participantes = lerInteiro();
+
+            if (participantes >= 0 && participantes <= MAX_PARTICIPANTES) {
+                break;
+            }
+            printf("Erro: a quantidade efetiva deve ser um numero inteiro entre 0 e %d.\n",
+                   MAX_PARTICIPANTES);
+        }
+
+        if (participantes > acoes[posicao].participantesPrevistos) {
+            printf("Aviso: a quantidade efetiva e maior que a prevista (%d).\n",
+                   acoes[posicao].participantesPrevistos);
+        }
+
+        acoes[posicao].participantesRealizados = participantes;
+    } else {
+        acoes[posicao].participantesRealizados = 0;
+    }
+
+    acoes[posicao].situacao = novaSituacao;
+    printf("Situacao atualizada com sucesso.\n");
+    mostrarAcao(posicao);
+}
+
+void gerarResumo() {
+    int i;
+    int planejadas = 0;
+    int realizadas = 0;
+    int canceladas = 0;
+    long previstoRealizadas = 0;
+    long efetivosRealizadas = 0;
+
+    printf("\n=== RESUMO GERAL ===\n");
+
+    for (i = 0; i < totalAcoes; i++) {
+        if (acoes[i].situacao == 1) {
+            planejadas++;
+        } else if (acoes[i].situacao == 2) {
+            realizadas++;
+            previstoRealizadas += acoes[i].participantesPrevistos;
+            efetivosRealizadas += acoes[i].participantesRealizados;
+        } else if (acoes[i].situacao == 3) {
+            canceladas++;
+        }
+    }
+
+    printf("Total de acoes cadastradas: %d\n", totalAcoes);
+    printf("Acoes planejadas: %d\n", planejadas);
+    printf("Acoes realizadas: %d\n", realizadas);
+    printf("Acoes canceladas: %d\n", canceladas);
+    printf("Participantes previstos (acoes realizadas): %ld\n", previstoRealizadas);
+    printf("Total de participantes efetivos: %ld\n", efetivosRealizadas);
+
+    if (previstoRealizadas > 0) {
+        printf("Percentual de participacao em relacao ao previsto: %.2f%%\n",
+               (double) efetivosRealizadas * 100.0 / (double) previstoRealizadas);
+    } else {
+        printf("Percentual de participacao: indisponivel (nenhuma acao realizada).\n");
+    }
+
+    printf("\nObservacao: o percentual considera apenas as acoes realizadas.\n");
+}
+
+void mostrarMenu() {
+    printf("\n========================================\n");
+    printf(" PSE EM ACAO - MENU PRINCIPAL\n");
+    printf("========================================\n");
+    printf("1 - Cadastrar acao\n");
+    printf("2 - Listar todas as acoes\n");
+    printf("3 - Pesquisar acao\n");
+    printf("4 - Atualizar situacao da acao\n");
+    printf("5 - Gerar resumo geral\n");
+    printf("0 - Sair do sistema\n");
+    printf("Escolha uma opcao: ");
+}
+
+int main() {
+    int opcao;
+
+    printf("PSE em Acao - use somente dados ficticios e coletivos.\n");
+
+    do {
+        mostrarMenu();
+        opcao = lerInteiro();
+
+        switch (opcao) {
+            case 1:
+                cadastrarAcao();
+                break;
+            case 2:
+                listarAcoes();
+                break;
+            case 3:
+                pesquisarAcoes();
+                break;
+            case 4:
+                atualizarSituacao();
+                break;
+            case 5:
+                gerarResumo();
+                break;
+            case 0:
+                printf("\nSistema encerrado. Obrigado por utilizar o PSE em Acao!\n");
+                break;
+            default:
+                printf("\nOpcao invalida. Escolha uma opcao exibida no menu.\n");
+        }
+    } while (opcao != 0);
+
+    return 0;
+}
